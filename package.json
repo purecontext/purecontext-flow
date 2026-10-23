@@ -1,0 +1,50 @@
+{
+  "name": "@purecontext/flow",
+  "version": "0.1.0",
+  "description": "A deterministic workflow state machine for agent sessions: the graph lives in a JSON file, every state change goes through one MCP tool, and the log says why",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./schema/workflow.schema.json": "./schema/workflow.schema.json"
+  },
+  "files": ["dist", "schema"],
+  "publishConfig": {
+    "access": "public"
+  },
+  "bin": {
+    "purecontext-flow": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "prepublishOnly": "tsc",
+    "test": "tsc && node --test --test-concurrency=1 test/*.test.mjs",
+    "check": "biome check . && tsc && node --test --test-concurrency=1 test/*.test.mjs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/purecontext/purecontext-flow.git"
+  },
+  "license": "MIT",
+  "keywords": ["workflow", "state-machine", "mcp", "agent", "claude-code"],
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.1"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.0",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.7.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["@biomejs/biome"]
+  }
+}

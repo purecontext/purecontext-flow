@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/purecontext/purecontext-flow/schema/workflow.schema.json",
+  "title": "purecontext-flow workflow",
+  "description": "A workflow state graph served by @purecontext/flow. Referential rules (targets exist, conditions parse) are checked by the engine at load time.",
+  "type": "object",
+  "required": ["states"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": { "type": "string" },
+    "name": { "type": "string" },
+    "version": { "type": "number" },
+    "description": { "type": "string" },
+    "initial_state": { "type": "string", "description": "The state a project starts in when its state file has none." },
+    "states": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": { "$ref": "#/$defs/state" }
+    },
+    "global_transitions": {
+      "type": "array",
+      "items": {
+        "allOf": [{ "$ref": "#/$defs/transition" }],
+        "properties": { "except": { "type": "array", "items": { "type": "string" } } }
+      }
+    },
+    "global_actions": { "type": "array", "items": { "type": "string" } },
+    "thresholds": { "type": "object", "additionalProperties": { "type": "number" } },
+    "resumption_targets": {
+      "type": "object",
+      "description": "previous state → state to enter when a null-target transition fires",
+      "additionalProperties": { "type": "string" }
+    },
+    "config": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "state_file": { "type": "string", "default": ".forge/dev-state.json" },
+        "log_file": { "type": "string", "default": ".forge/flow-log.jsonl" },
+        "state_field": { "type": "string", "default": "workflow_state" },
+        "previous_state_field": { "type": "string", "default": "previous_<state_field>" }
+      }
+    }
+  },
+  "$defs": {
+    "state": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "description": { "type": "string" },
+        "transitions": { "type": "array", "items": { "$ref": "#/$defs/transition" } },
+        "triggers": { "type": "array", "items": { "$ref": "#/$defs/trigger" } }
+      }
+    },
+    "transition": {
+      "type": "object",
+      "required": ["event", "target"],
+      "properties": {
+        "event": { "type": "string", "minLength": 1 },
+        "target": {
+          "type": ["string", "null"],
+          "description": "null resolves from resumption_targets[previous state]"
+        },
+        "action": { "type": ["string", "null"] },
+        "judgment": { "type": "boolean" },
+        "description": { "type": ["string", "null"] }
+      }
+    },
+    "trigger": {
+      "type": "object",
+      "required": ["condition", "target"],
+      "properties": {
+        "condition": {
+          "type": "string",
+          "description": "\"always\", or \"<path> <op> <path|number>\" with op in >= <= == != > <; paths are dotted lookups into the check context, and thresholds.* reads the workflow thresholds"
+        },
+        "target": { "type": ["string", "null"] },
+        "action": { "type": ["string", "null"] },
+        "description": { "type": ["string", "null"] }
+      }
+    }
+  }
+}
