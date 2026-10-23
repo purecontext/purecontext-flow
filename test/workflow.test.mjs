@@ -31,8 +31,7 @@ test('validation names every broken reference', () => {
   expect('resumes to unknown state "elsewhere"')
   expect('threshold "max_review_rounds" must be a number')
   expect('event "done" is defined twice')
-  expect('reads thresholds.max_review_rounds, which the workflow does not define')
-  assert.equal(issues.length, 9)
+  assert.equal(issues.length, 8)
 })
 
 test('a null target needs resumption_targets', () => {

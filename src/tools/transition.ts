@@ -49,10 +49,7 @@ export function handler(engine: Engine, { event, project_path, state_updates, co
   try {
     current = engine.current(project_path)
   } catch (err) {
-    return {
-      error: `Failed to read the state file: ${(err as Error).message}`,
-      state_path: engine.stateFile(project_path),
-    }
+    return { error: `Failed to read the state file: ${(err as Error).message}` }
   }
   const { path, data } = current
   if (!current.state) {
