@@ -23,10 +23,15 @@ export interface CurrentState {
 /** One workflow, one project root: the object every tool handler works against. */
 export class Engine {
   readonly config: ResolvedConfig
-  readonly graph: WorkflowGraph
+  graph: WorkflowGraph
 
   constructor(config: ResolvedConfig, workflow: Workflow) {
     this.config = config
+    this.graph = new WorkflowGraph(workflow)
+  }
+
+  /** Swap in a new graph, e.g. after flow_modify writes the workflow file. */
+  reload(workflow: Workflow): void {
     this.graph = new WorkflowGraph(workflow)
   }
 

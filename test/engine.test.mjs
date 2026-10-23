@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { test } from 'node:test'
 import {
@@ -108,6 +108,55 @@ test('flow_check: options, a firing trigger, and an unknown state', () => {
   const bad = flowCheck.handler(engine, { workflow_state: 'limbo' })
   assert.match(bad.error, /Unknown state/)
   assert.ok(bad.valid_states.includes('idle'))
+})
+
+test('a trigger that reads an undefined threshold is a load error', () => {
+  const w = workflow()
+  w.states['in-review'].triggers[0].condition = 'session_counters.review_rounds >= thresholds.nope'
+  assert.throws(
+    () => engineFor(project({ workflow: w })),
+    (err) => /reads thresholds\.nope, which the workflow does not define/.test(err.message),
+  )
+})
+
+test('state and workflow writes leave no temp file behind and never share one absolute state file across projects', () => {
+  const root = project({ state: { workflow_state: 'idle' } })
+  const engine = engineFor(root)
+  flowTransition.handler(engine, { event: 'task-picked' })
+  flowModify.handler(engine, {
+    operation: 'update_threshold',
+    threshold_key: 'max_review_rounds',
+    threshold_value: 4,
+    confirm: true,
+  })
+  const leftovers = readdirSync(join(root, '.forge')).filter((f) => f.endsWith('.tmp'))
+  assert.deepEqual(leftovers, [])
+  assert.equal(engine.graph.thresholds().max_review_rounds, 4, 'the running engine loaded the new graph')
+
+  const shared = engineFor(root, { stateFile: join(root, 'one-state.json') })
+  const result = flowTransition.handler(shared, { event: 'task-picked', project_path: 'projects/a' })
+  assert.match(result.error, /cannot be used with the absolute state file/)
+  assert.match(
+    flowCheck.handler(shared, { project_path: 'projects/a' }).error,
+    /cannot be used with the absolute state file/,
+  )
+})
+
+test('log entries name the state file they concern', () => {
+  const root = project({ workflow: { ...workflow(), config: { state_file: 'state.json' } } })
+  mkdirSync(join(root, 'projects/a'), { recursive: true })
+  writeFileSync(join(root, 'projects/a/state.json'), JSON.stringify({ workflow_state: 'idle' }))
+  const engine = engineFor(root)
+  flowTransition.handler(engine, {
+    event: 'task-picked',
+    project_path: 'projects/a',
+    judgment: { condition: 'c', result: true },
+  })
+  flowCheck.handler(engine, { workflow_state: 'in-review', context: { session_counters: { review_rounds: 3 } } })
+  const [transition, judgment, trigger] = engine.history()
+  assert.equal(transition.state_path, join(root, 'projects/a/state.json'))
+  assert.equal(judgment.state_path, join(root, 'projects/a/state.json'))
+  assert.equal(trigger.state_path, null, 'a check with an explicit state read no file')
 })
 
 test('flow_check: resumption from context, and from the state file when the state is omitted', () => {
@@ -322,7 +371,7 @@ test('flow_modify: previews do not write, confirms write the resolved workflow, 
     true,
   )
   assert.equal(readJson(wfPath).states.parked.description, 'On hold')
-  const fresh = engineFor(root)
+  const fresh = engine
   assert.equal(
     flowModify.handler(fresh, {
       operation: 'add_transition',

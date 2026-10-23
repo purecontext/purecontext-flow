@@ -1,6 +1,6 @@
 {
   "name": "@purecontext/flow",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A deterministic workflow state machine for agent sessions: the graph lives in a JSON file, every state change goes through one MCP tool, and the log says why",
   "type": "module",
   "main": "dist/index.js",

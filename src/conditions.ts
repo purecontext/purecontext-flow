@@ -34,15 +34,21 @@ export function lookup(scope: Record<string, unknown>, path: string): unknown {
 }
 
 /**
- * Evaluate a condition against a scope. A missing left side counts as 0 (counters
- * start at zero). A missing right side makes the condition unresolvable (null), so
- * a trigger that references an undefined threshold never fires.
+ * Evaluate a condition against a scope. A left side whose parent object exists but
+ * whose leaf is missing counts as 0 (counters start at zero). A left side whose
+ * parent is missing, or a missing right side, makes the condition unresolvable
+ * (null), so a typo in a path cannot fire a trigger forever or silence it.
  */
 export function evaluateCondition(condition: string, scope: Record<string, unknown>): boolean | null {
   const parsed = parseCondition(condition)
   if (!parsed) return null
   if (parsed.kind === 'always') return true
   const leftRaw = lookup(scope, parsed.left)
+  if (leftRaw === undefined || leftRaw === null) {
+    const parentPath = parsed.left.split('.').slice(0, -1).join('.')
+    const parent = parentPath ? lookup(scope, parentPath) : scope
+    if (parent === undefined || parent === null || typeof parent !== 'object') return null
+  }
   const left = typeof leftRaw === 'number' ? leftRaw : leftRaw === undefined || leftRaw === null ? 0 : Number(leftRaw)
   const rightRaw = 'value' in parsed.right ? parsed.right.value : lookup(scope, parsed.right.path)
   if (rightRaw === undefined || rightRaw === null) return null

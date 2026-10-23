@@ -44,7 +44,12 @@ export function handler(engine: Engine, { workflow_state, project_path, context 
   let previous: string | undefined
   let fromFile: string | undefined
   if (!stateName) {
-    const current = engine.current(project_path)
+    let current: ReturnType<Engine['current']>
+    try {
+      current = engine.current(project_path)
+    } catch (err) {
+      return { error: `Failed to read the state file: ${(err as Error).message}` }
+    }
     if (!current.state) {
       return {
         error: `No ${engine.config.stateField} in ${current.path} and the workflow has no initial_state`,
@@ -99,6 +104,7 @@ export function handler(engine: Engine, { workflow_state, project_path, context 
       trigger: trigger.condition,
       context: context ?? null,
       target: trigger.target,
+      state_path: fromFile ?? null,
     })
     return {
       ...base,

@@ -34,8 +34,14 @@ export function validateWorkflow(input: unknown): string[] {
   }
   const checkTrigger = (t: unknown, where: string) => {
     if (!isObject(t)) return issues.push(`${where}: trigger must be an object`)
-    if (typeof t.condition !== 'string' || !parseCondition(t.condition)) {
+    const parsed = typeof t.condition === 'string' ? parseCondition(t.condition) : null
+    if (!parsed) {
       issues.push(`${where}: trigger condition "${t.condition}" is not "always" or "<path> <op> <path|number>"`)
+    } else if (parsed.kind === 'compare' && 'path' in parsed.right && parsed.right.path.startsWith('thresholds.')) {
+      const key = parsed.right.path.slice('thresholds.'.length)
+      if (!isObject(w.thresholds) || !(key in w.thresholds)) {
+        issues.push(`${where}: trigger "${t.condition}" reads thresholds.${key}, which the workflow does not define`)
+      }
     }
     if (!known(t.target)) issues.push(`${where}: trigger "${t.condition}" targets unknown state "${t.target}"`)
   }

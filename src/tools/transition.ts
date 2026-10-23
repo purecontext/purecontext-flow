@@ -114,10 +114,12 @@ export function handler(engine: Engine, { event, project_path, state_updates, co
     event,
     action: transition.action ?? null,
     context: context ?? null,
+    state_path: path,
   })
   if (judgment) {
     engine.log({
       type: 'judgment',
+      state_path: path,
       state: from,
       condition: judgment.condition ?? null,
       result: judgment.result ?? null,

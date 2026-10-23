@@ -1,4 +1,4 @@
-import { resolve } from 'node:path'
+import { isAbsolute, resolve } from 'node:path'
 import type { ResolvedConfig, WorkflowConfig } from './types.js'
 
 export const DEFAULTS = {
@@ -49,8 +49,15 @@ export function resolveConfig(input: ConfigInput = {}, workflowConfig: WorkflowC
   }
 }
 
-/** The state file for the root, or for a project directory under it. */
+/**
+ * The state file for the root, or for a project directory under it. An absolute
+ * state file cannot be combined with project_path: every project would silently
+ * share one file.
+ */
 export function stateFilePath(config: ResolvedConfig, projectPath?: string): string {
+  if (projectPath && isAbsolute(config.stateFile)) {
+    throw new Error(`project_path "${projectPath}" cannot be used with the absolute state file ${config.stateFile}`)
+  }
   const dir = projectPath ? resolve(config.root, projectPath) : config.root
   return resolve(dir, config.stateFile)
 }

@@ -1,12 +1,13 @@
-import { readFileSync, writeFileSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import type { Engine } from '../engine.js'
+import { writeFileAtomic } from '../state.js'
 import type { Transition, Trigger, Workflow } from '../types.js'
 import { WorkflowGraph, validateWorkflow } from '../workflow.js'
 
 export const schema = {
   name: 'flow_modify',
   description:
-    'Guided edits to the workflow file the server runs on: add or remove states and transitions, add triggers, update thresholds. Returns a preview until confirm is true. The running server keeps the old graph until restarted.',
+    'Guided edits to the workflow file the server runs on: add or remove states and transitions, add triggers, update thresholds. Returns a preview until confirm is true. On confirm the file is rewritten as 2-space JSON and the running server loads the new graph at once.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -104,20 +105,21 @@ export function handler(engine: Engine, args: ModifyArgs) {
       preview: true,
       operation: args.operation,
       change: result.change,
-      message: 'Set confirm: true to apply. Restart the server afterwards to load the new graph.',
+      message: 'Set confirm: true to apply.',
     }
   }
   const workflow = read()
   result.apply(workflow)
   const issues = validateWorkflow(workflow)
   if (issues.length) return { error: 'The change would leave the workflow invalid; nothing was written', issues }
-  writeFileSync(path, `${JSON.stringify(workflow, null, 2)}\n`, 'utf8')
+  writeFileAtomic(path, `${JSON.stringify(workflow, null, 2)}\n`)
+  engine.reload(workflow)
   return {
     applied: true,
     operation: args.operation,
     change: result.change,
     path,
-    message: `Written to ${path}. Restart the server to load the new graph.`,
+    message: `Written to ${path} and loaded.`,
   }
 }
 

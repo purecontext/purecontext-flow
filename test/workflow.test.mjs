@@ -31,7 +31,8 @@ test('validation names every broken reference', () => {
   expect('resumes to unknown state "elsewhere"')
   expect('threshold "max_review_rounds" must be a number')
   expect('event "done" is defined twice')
-  assert.equal(issues.length, 8)
+  expect('reads thresholds.max_review_rounds, which the workflow does not define')
+  assert.equal(issues.length, 9)
 })
 
 test('a null target needs resumption_targets', () => {
@@ -62,7 +63,17 @@ test('conditions: always, thresholds, literals, operators, missing sides', () =>
   assert.equal(evaluateCondition('session_counters.rounds == 3', scope), true)
   assert.equal(evaluateCondition('session_counters.rounds != 3', scope), false)
   assert.equal(evaluateCondition('session_counters.rounds <= 2', scope), false)
-  assert.equal(evaluateCondition('session_counters.missing < 1', scope), true, 'a missing counter reads as 0')
+  assert.equal(
+    evaluateCondition('session_counters.missing < 1', scope),
+    true,
+    'a missing counter in an existing object reads as 0',
+  )
+  assert.equal(
+    evaluateCondition('sesion_counters.rounds < 1', scope),
+    null,
+    'a typo in the parent is unresolvable, not 0',
+  )
+  assert.equal(evaluateCondition('top_level_missing < 1', scope), true, 'a bare missing key at the top reads as 0')
   assert.equal(
     evaluateCondition('session_counters.rounds >= thresholds.missing', scope),
     null,

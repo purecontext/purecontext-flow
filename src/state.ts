@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import type { StateData } from './types.js'
 
@@ -19,6 +19,13 @@ export function readState(path: string): StateData | null {
 }
 
 export function writeState(path: string, data: StateData): void {
+  writeFileAtomic(path, `${JSON.stringify(data, null, 2)}\n`)
+}
+
+/** Write via a temp file and rename, so a crash mid-write never leaves truncated JSON behind. */
+export function writeFileAtomic(path: string, contents: string): void {
   mkdirSync(dirname(path), { recursive: true })
-  writeFileSync(path, `${JSON.stringify(data, null, 2)}\n`, 'utf8')
+  const tmp = `${path}.${process.pid}.${Date.now()}.tmp`
+  writeFileSync(tmp, contents, 'utf8')
+  renameSync(tmp, path)
 }
