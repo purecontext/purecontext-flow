@@ -3,7 +3,7 @@ import { basename } from 'node:path'
 import type { Engine } from '../engine.js'
 import { writeFileAtomic } from '../state.js'
 import type { Transition, Trigger, Workflow } from '../types.js'
-import { WorkflowGraph, composeWorkflow, validateWorkflow } from '../workflow.js'
+import { type LoadedWorkflow, WorkflowGraph, composeWorkflow, validateWorkflow } from '../workflow.js'
 
 export const schema = {
   name: 'flow_modify',
@@ -87,10 +87,10 @@ export function handler(engine: Engine, args: ModifyArgs) {
     }
   }
   // The merged graph as the files are now (two edits in one session must see each other).
-  const read = (): Workflow => composeWorkflow(readBase(), path).workflow
+  const read = () => composeWorkflow(readBase(), path)
 
   if (args.operation === 'preview') {
-    const w = read()
+    const w = read().workflow
     const states: Record<string, unknown> = {}
     for (const [name, s] of Object.entries(w.states)) {
       states[name] = {
@@ -112,7 +112,7 @@ export function handler(engine: Engine, args: ModifyArgs) {
     }
   }
 
-  const result = compute(args, read, engine.origin, basename(path))
+  const result = compute(args, read, basename(path))
   if ('error' in result) return result
   if (!args.confirm) {
     return {
@@ -147,15 +147,22 @@ export function handler(engine: Engine, args: ModifyArgs) {
 }
 
 // Checks run against the files as they are now, not the graph the server loaded
-// at startup: two edits in one session must see each other. `origin` says which
-// file defines what; only the base file (`baseLabel`) is editable here.
-function compute(args: ModifyArgs, read: () => Workflow, origin: Engine['origin'], baseLabel: string): Change {
-  const graph = new WorkflowGraph(read())
+// at startup: two edits in one session must see each other, and a fragment that
+// appeared since startup owns its states from this call on. Only the base file
+// (`baseLabel`) is editable here.
+function compute(args: ModifyArgs, read: () => LoadedWorkflow, baseLabel: string): Change {
+  const { workflow: current, origin } = read()
+  const graph = new WorkflowGraph(current)
   const { operation, state_name, state_description, transition, trigger, threshold_key, threshold_value } = args
-  const owned = (what: string, file: string | undefined) =>
-    file && file !== baseLabel
-      ? { error: `${what} is defined in workflow.d/${file}; edit that fragment instead` }
-      : null
+  const owned = (what: string, file: string | undefined) => {
+    if (!file || file === baseLabel) return null
+    const plugin = origin.names[file]
+    return {
+      error: plugin
+        ? `${what} is defined by ${plugin} (workflow.d/${file}); change it in the ${plugin} plugin`
+        : `${what} is defined in workflow.d/${file}; edit that fragment instead`,
+    }
+  }
   switch (operation) {
     case 'add_state': {
       if (!state_name) return { error: 'state_name is required for add_state' }

@@ -106,7 +106,7 @@ export function createEngine(options: EngineOptions = {}): Engine {
 /** A workflow supplied as data, or read from one file: every state, event and threshold is the base's. */
 function fromSingleFile(workflow: Workflow, workflowPath: string): LoadedWorkflow {
   const label = basename(workflowPath)
-  const origin: WorkflowOrigin = { states: {}, events: {}, thresholds: {} }
+  const origin: WorkflowOrigin = { states: {}, events: {}, thresholds: {}, names: {} }
   for (const [name, s] of Object.entries(workflow.states)) {
     origin.states[name] = label
     for (const t of s.transitions ?? []) origin.events[`${name} ${t.event}`] = label

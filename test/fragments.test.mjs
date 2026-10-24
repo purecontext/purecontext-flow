@@ -61,7 +61,7 @@ test('fragments merge in filename order and only fragments can make a whole work
   fragment(root, 'b.json', {
     states: { idle: { description: 'Also start', transitions: [{ event: 'second', target: 'idle' }] } },
   })
-  assert.throws(() => engineFor(root), /b\.json: state "idle" is already defined in a\.json/)
+  assert.throws(() => engineFor(root), /b\.json: state "idle" is already defined in a\.json$/m)
   assert.equal(flowCheck.handler(engine, {}).state, 'idle')
 })
 
@@ -91,8 +91,40 @@ test('merge conflicts name both files', () => {
     'x.json: state "idle" event "task-picked" is already defined in workflow.json',
   ])
   assert.deepEqual(conflict({ states: { idle: { description: 'Mine now' } } }), [
-    'x.json: state "idle" is already defined in workflow.json; a later piece may add transitions and triggers to it, not a description',
+    'x.json: state "idle" is already defined in workflow.json',
   ])
+  // Two fragments that both mean to own a state collide in either order; an extension before the definition is fine.
+  const two = (first, second) => {
+    try {
+      mergeWorkflows(base, [
+        { label: 'a.json', data: first },
+        { label: 'b.json', data: second },
+      ])
+    } catch (err) {
+      return err.issues
+    }
+    return []
+  }
+  const define = {
+    states: { review: { description: 'Under review', transitions: [{ event: 'done', target: 'idle' }] } },
+  }
+  const extend = { states: { review: { transitions: [{ event: 'abandon', target: 'idle' }] } } }
+  assert.deepEqual(two(define, { states: { review: { description: 'Also under review' } } }), [
+    'b.json: state "review" is already defined in a.json',
+  ])
+  assert.deepEqual(two(define, extend), [])
+  assert.deepEqual(two(extend, define), [])
+  const late = mergeWorkflows(base, [
+    { label: 'a.json', data: extend },
+    { label: 'b.json', data: { name: 'crucible', ...define } },
+  ])
+  assert.equal(late.workflow.states.review.description, 'Under review')
+  assert.deepEqual(
+    late.workflow.states.review.transitions.map((t) => t.event),
+    ['abandon', 'done'],
+  )
+  assert.equal(late.origin.states.review, 'b.json')
+  assert.equal(late.origin.names['b.json'], 'crucible')
   assert.deepEqual(conflict({ states: {}, thresholds: { max_review_rounds: 5 } }), [
     'x.json: threshold "max_review_rounds" = 5 disagrees with workflow.json (3)',
   ])
@@ -131,8 +163,20 @@ test('flow_modify edits the base file only and sees the fragments', () => {
   fragment(root, 'planning.json', planning())
   const engine = engineFor(root)
   const refused = (args) => flowModify.handler(engine, { ...args, confirm: true }).error
-  assert.match(refused({ operation: 'add_state', state_name: 'planning' }), /defined in workflow\.d\/planning\.json/)
-  assert.match(refused({ operation: 'remove_state', state_name: 'planning' }), /defined in workflow\.d\/planning\.json/)
+  assert.equal(
+    refused({ operation: 'add_state', state_name: 'planning' }),
+    'State "planning" is defined by planning (workflow.d/planning.json); change it in the planning plugin',
+  )
+  // A fragment dropped in after the engine loaded owns its states from the next call on.
+  fragment(root, 'review.json', {
+    states: { review: { description: 'Review', transitions: [{ event: 'ok', target: 'idle' }] } },
+  })
+  assert.match(
+    refused({ operation: 'add_trigger', state_name: 'review', trigger: { condition: 'always', target: 'idle' } }),
+    /defined in workflow\.d\/review\.json; edit that fragment instead/,
+  )
+  rmSync(join(root, '.forge', 'workflow.d', 'review.json'))
+  assert.match(refused({ operation: 'remove_state', state_name: 'planning' }), /workflow\.d\/planning\.json/)
   assert.match(
     refused({ operation: 'add_transition', state_name: 'planning', transition: { event: 'x', target: 'idle' } }),
     /planning\.json/,
@@ -143,7 +187,7 @@ test('flow_modify edits the base file only and sees the fragments', () => {
   )
   assert.match(
     refused({ operation: 'remove_transition', state_name: 'idle', transition: { event: 'plan' } }),
-    /Event "plan" on state "idle" is defined in workflow\.d\/planning\.json/,
+    /Event "plan" on state "idle" is defined by planning \(workflow\.d\/planning\.json\)/,
   )
   // A base state a fragment points at cannot be removed.
   assert.match(refused({ operation: 'remove_state', state_name: 'idle' }), /referenced by .*planning → plan-done/)

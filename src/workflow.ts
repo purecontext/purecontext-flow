@@ -136,9 +136,13 @@ export interface WorkflowSources {
 
 /** Which file defines each state, each `state event` pair and each threshold. */
 export interface WorkflowOrigin {
+  /** State name → file that defines it (carries its description), else the first file to mention it. */
   states: Record<string, string>
+  /** `<state> <event>` → file. */
   events: Record<string, string>
   thresholds: Record<string, string>
+  /** File → the `name` that fragment declares (its plugin), when it does. */
+  names: Record<string, string>
 }
 
 export interface LoadedWorkflow {
@@ -254,16 +258,18 @@ interface Piece<T> {
 /**
  * Merge pieces in order. States, transitions, triggers, global transitions and
  * actions accumulate; thresholds, resumption targets and initial_state must
- * agree. The first piece to mention a state defines it; a later piece may add
- * transitions and triggers to it but not a description, so two pieces never
- * both claim a state. Throws a WorkflowError naming both files on every conflict.
+ * agree. A state entry with a `description` is a definition and one without is
+ * an extension (transitions and triggers added to a state some piece defines);
+ * two definitions of one state are a conflict, in either order. Throws a
+ * WorkflowError naming both files on every conflict.
  */
 export function mergeWorkflows(
   base: Piece<Workflow> | null,
   fragments: Piece<WorkflowFragment>[],
 ): { workflow: Workflow; origin: WorkflowOrigin } {
   const issues: string[] = []
-  const origin: WorkflowOrigin = { states: {}, events: {}, thresholds: {} }
+  const origin: WorkflowOrigin = { states: {}, events: {}, thresholds: {}, names: {} }
+  const defined: Record<string, string> = {} // state → file whose entry carries a description
   const globalEvents: Record<string, string> = {}
   const from: Record<string, string> = {} // initial_state and resumption_targets owners
   const out: Workflow = { states: {} }
@@ -277,19 +283,26 @@ export function mergeWorkflows(
     if (config !== undefined) out.config = config
   }
   for (const { label, data } of pieces) {
+    if (typeof data.name === 'string' && data.name) origin.names[label] = data.name
     for (const [name, state] of Object.entries(data.states ?? {})) {
       const existing = out.states[name]
+      const defines = state.description !== undefined
+      if (defines) {
+        if (defined[name]) issues.push(`${label}: state "${name}" is already defined in ${defined[name]}`)
+        else {
+          defined[name] = label
+          origin.states[name] = label
+        }
+      }
       if (!existing) {
         const copy: State = { ...state }
         if (state.transitions) copy.transitions = [...state.transitions]
         if (state.triggers) copy.triggers = [...state.triggers]
         out.states[name] = copy
-        origin.states[name] = label
+        origin.states[name] ??= label
       } else {
-        if (state.description !== undefined)
-          issues.push(
-            `${label}: state "${name}" is already defined in ${origin.states[name]}; a later piece may add transitions and triggers to it, not a description`,
-          )
+        if (defines && !defined[name]) existing.description = state.description
+        else if (defines && defined[name] === label) existing.description = state.description
         if (state.transitions?.length) existing.transitions = [...(existing.transitions ?? []), ...state.transitions]
         if (state.triggers?.length) existing.triggers = [...(existing.triggers ?? []), ...state.triggers]
       }
