@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { writeFileSync } from 'node:fs'
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { test } from 'node:test'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
@@ -84,4 +84,33 @@ test('--validate reports a valid file and a broken one', () => {
   const bad = spawnSync(process.execPath, [CLI, '--validate', '--root', root], { encoding: 'utf8' })
   assert.equal(bad.status, 1)
   assert.match(bad.stderr, /unknown state "nowhere"/)
+})
+
+test('a workflow created after startup is loaded on the next call, without a restart', async () => {
+  const root = project()
+  rmSync(join(root, '.forge', 'workflow.json'))
+  const client = await connect(['--root', root])
+  try {
+    const before = await client.callTool({ name: 'flow_check', arguments: {} })
+    assert.equal(before.isError, true)
+    assert.match(text(before).error, /No workflow at/)
+    writeFileSync(join(root, '.forge/workflow.json'), JSON.stringify(workflow()))
+    const after = await client.callTool({ name: 'flow_check', arguments: {} })
+    assert.equal(after.isError, undefined, JSON.stringify(after))
+    assert.equal(text(after).state, 'idle')
+  } finally {
+    await client.close()
+  }
+})
+
+test('--validate counts fragments', () => {
+  const root = project()
+  mkdirSync(join(root, '.forge/workflow.d'))
+  writeFileSync(
+    join(root, '.forge/workflow.d/extra.json'),
+    JSON.stringify({ states: { parked: { transitions: [{ event: 'back', target: 'idle' }] } } }),
+  )
+  const ok = spawnSync(process.execPath, [CLI, '--validate', '--root', root], { encoding: 'utf8' })
+  assert.equal(ok.status, 0, ok.stderr)
+  assert.match(ok.stderr, /valid \(6 states, 1 fragment\)/)
 })

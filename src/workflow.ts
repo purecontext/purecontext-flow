@@ -1,4 +1,5 @@
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
+import { basename, dirname, join } from 'node:path'
 import { evaluateCondition, parseCondition } from './conditions.js'
 import type { CheckContext, GlobalTransition, State, Transition, Trigger, Workflow } from './types.js'
 
@@ -109,17 +110,237 @@ export function parseWorkflow(raw: string, source = 'workflow'): Workflow {
   return data as Workflow
 }
 
+/** The merged workflow for a workflow path: the base file plus every fragment beside it. */
 export function loadWorkflow(path: string): Workflow {
-  let raw: string
+  return loadWorkflowSources(path).workflow
+}
+
+// --- fragments -----------------------------------------------------------
+//
+// A workflow can be composed from pieces: the base file (.forge/workflow.json)
+// plus every *.json in workflow.d/ beside it, merged in filename order. Each
+// fragment is a partial workflow: states it adds, transitions and triggers it
+// adds to states another piece defines, global transitions, thresholds and
+// resumption targets. Two pieces never define the same event on the same state,
+// the same threshold with different values, or different initial states. Only
+// the base carries `config`. The merged result is validated like a single file.
+
+/** A partial workflow merged into the base at load time. Everything but `config`. */
+export type WorkflowFragment = Omit<Workflow, 'config'>
+
+/** The files a loaded workflow came from. `base` is null when only fragments exist. */
+export interface WorkflowSources {
+  base: string | null
+  fragments: string[]
+}
+
+/** Which file defines each state, each `state event` pair and each threshold. */
+export interface WorkflowOrigin {
+  states: Record<string, string>
+  events: Record<string, string>
+  thresholds: Record<string, string>
+}
+
+export interface LoadedWorkflow {
+  workflow: Workflow
+  sources: WorkflowSources
+  origin: WorkflowOrigin
+}
+
+/** Where a workflow's fragments live: `workflow.d/` beside the workflow file. */
+export function fragmentsDir(workflowPath: string): string {
+  return join(dirname(workflowPath), 'workflow.d')
+}
+
+/** The fragment files for a workflow path, in the order they merge. */
+export function fragmentPaths(workflowPath: string): string[] {
+  let names: string[]
   try {
-    raw = readFileSync(path, 'utf8')
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-      throw new WorkflowError(`No workflow at ${path}. Create one (see the workflow schema) and restart the server.`)
-    }
-    throw err
+    names = readdirSync(fragmentsDir(workflowPath))
+  } catch {
+    return []
   }
-  return parseWorkflow(raw, path)
+  return names
+    .filter((n) => n.endsWith('.json'))
+    .sort()
+    .map((n) => join(fragmentsDir(workflowPath), n))
+}
+
+/** Read the base file (if any) and its fragments, merge, validate. */
+export function loadWorkflowSources(path: string): LoadedWorkflow {
+  let base: Workflow | null = null
+  try {
+    base = parseWorkflow(readFileSync(path, 'utf8'), path)
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err
+  }
+  const loaded = composeWorkflow(base, path)
+  if (!base && loaded.sources.fragments.length === 0) {
+    throw new WorkflowError(
+      `No workflow at ${path} and no fragments in ${fragmentsDir(path)}. Create one (see the workflow schema); the server loads it on the next call.`,
+    )
+  }
+  return loaded
+}
+
+/**
+ * Merge a base workflow (already parsed, or null) with the fragments on disk
+ * beside `workflowPath`. flow_modify uses this to validate an edited base
+ * against the fragments before writing it.
+ */
+export function composeWorkflow(base: Workflow | null, workflowPath: string): LoadedWorkflow {
+  const paths = fragmentPaths(workflowPath)
+  const fragments = paths.map((p) => ({ label: basename(p), data: parseFragment(readFileSync(p, 'utf8'), p) }))
+  const { workflow, origin } = mergeWorkflows(base ? { label: basename(workflowPath), data: base } : null, fragments)
+  if (paths.length) {
+    const issues = validateWorkflow(workflow)
+    if (issues.length) {
+      throw new WorkflowError(
+        `${workflowPath} with ${paths.length} fragment(s) in workflow.d/ is not a valid workflow`,
+        issues,
+      )
+    }
+  }
+  return { workflow, sources: { base: base ? workflowPath : null, fragments: paths }, origin }
+}
+
+/** Structural checks on one fragment. Referential checks run on the merged workflow. */
+export function validateFragment(input: unknown): string[] {
+  const issues: string[] = []
+  if (!isObject(input)) return ['fragment must be a JSON object']
+  const f = input as Partial<WorkflowFragment> & { config?: unknown }
+  if (f.config !== undefined) issues.push('"config" belongs to the base workflow, not a fragment')
+  if (f.states !== undefined && !isObject(f.states)) issues.push('"states" must be an object of state name → state')
+  for (const [name, state] of Object.entries(isObject(f.states) ? f.states : {})) {
+    if (!isObject(state)) {
+      issues.push(`state "${name}" must be an object`)
+      continue
+    }
+    if (state.transitions !== undefined && !Array.isArray(state.transitions))
+      issues.push(`state "${name}": "transitions" must be an array`)
+    if (state.triggers !== undefined && !Array.isArray(state.triggers))
+      issues.push(`state "${name}": "triggers" must be an array`)
+    for (const t of Array.isArray(state.transitions) ? state.transitions : [])
+      if (!isObject(t) || typeof t.event !== 'string' || !t.event)
+        issues.push(`state "${name}": every transition needs a string "event"`)
+  }
+  if (f.global_transitions !== undefined && !Array.isArray(f.global_transitions))
+    issues.push('"global_transitions" must be an array')
+  if (f.global_actions !== undefined && !Array.isArray(f.global_actions))
+    issues.push('"global_actions" must be an array')
+  if (f.thresholds !== undefined && !isObject(f.thresholds)) issues.push('"thresholds" must be an object')
+  if (f.resumption_targets !== undefined && !isObject(f.resumption_targets))
+    issues.push('"resumption_targets" must be an object')
+  return issues
+}
+
+export function parseFragment(raw: string, source = 'fragment'): WorkflowFragment {
+  let data: unknown
+  try {
+    data = JSON.parse(raw)
+  } catch (err) {
+    throw new WorkflowError(`${source} is not valid JSON: ${(err as Error).message}`)
+  }
+  const issues = validateFragment(data)
+  if (issues.length) throw new WorkflowError(`${source} is not a valid workflow fragment`, issues)
+  return data as WorkflowFragment
+}
+
+interface Piece<T> {
+  label: string
+  data: T
+}
+
+/**
+ * Merge pieces in order. States, transitions, triggers, global transitions and
+ * actions accumulate; thresholds, resumption targets and initial_state must
+ * agree. The first piece to define a state owns its description. Throws a
+ * WorkflowError naming both files on every conflict.
+ */
+export function mergeWorkflows(
+  base: Piece<Workflow> | null,
+  fragments: Piece<WorkflowFragment>[],
+): { workflow: Workflow; origin: WorkflowOrigin } {
+  const issues: string[] = []
+  const origin: WorkflowOrigin = { states: {}, events: {}, thresholds: {} }
+  const globalEvents: Record<string, string> = {}
+  const from: Record<string, string> = {} // initial_state and resumption_targets owners
+  const out: Workflow = { states: {} }
+  const pieces: Piece<WorkflowFragment>[] = base ? [base, ...fragments] : fragments
+  if (base) {
+    const { $schema, name, version, description, config } = base.data
+    if ($schema !== undefined) out.$schema = $schema
+    if (name !== undefined) out.name = name
+    if (version !== undefined) out.version = version
+    if (description !== undefined) out.description = description
+    if (config !== undefined) out.config = config
+  }
+  for (const { label, data } of pieces) {
+    for (const [name, state] of Object.entries(data.states ?? {})) {
+      const existing = out.states[name]
+      if (!existing) {
+        const copy: State = { ...state }
+        if (state.transitions) copy.transitions = [...state.transitions]
+        if (state.triggers) copy.triggers = [...state.triggers]
+        out.states[name] = copy
+        origin.states[name] = label
+      } else {
+        if (state.description && !existing.description) existing.description = state.description
+        if (state.transitions?.length) existing.transitions = [...(existing.transitions ?? []), ...state.transitions]
+        if (state.triggers?.length) existing.triggers = [...(existing.triggers ?? []), ...state.triggers]
+      }
+      for (const t of state.transitions ?? []) {
+        const key = `${name} ${t.event}`
+        if (origin.events[key])
+          issues.push(`${label}: state "${name}" event "${t.event}" is already defined in ${origin.events[key]}`)
+        else origin.events[key] = label
+      }
+    }
+    for (const g of data.global_transitions ?? []) {
+      if (globalEvents[g.event])
+        issues.push(`${label}: global event "${g.event}" is already defined in ${globalEvents[g.event]}`)
+      else globalEvents[g.event] = label
+      out.global_transitions ??= []
+      out.global_transitions.push(g)
+    }
+    for (const a of data.global_actions ?? []) {
+      out.global_actions ??= []
+      if (!out.global_actions.includes(a)) out.global_actions.push(a)
+    }
+    for (const [k, v] of Object.entries(data.thresholds ?? {})) {
+      if (origin.thresholds[k] && out.thresholds?.[k] !== v)
+        issues.push(`${label}: threshold "${k}" = ${v} disagrees with ${origin.thresholds[k]} (${out.thresholds?.[k]})`)
+      else {
+        out.thresholds ??= {}
+        out.thresholds[k] = v
+        origin.thresholds[k] ??= label
+      }
+    }
+    for (const [k, v] of Object.entries(data.resumption_targets ?? {})) {
+      const owner = from[`resume ${k}`]
+      if (owner && out.resumption_targets?.[k] !== v)
+        issues.push(
+          `${label}: resumption target "${k}" → "${v}" disagrees with ${owner} ("${out.resumption_targets?.[k]}")`,
+        )
+      else {
+        out.resumption_targets ??= {}
+        out.resumption_targets[k] = v
+        from[`resume ${k}`] ??= label
+      }
+    }
+    if (data.initial_state !== undefined) {
+      if (out.initial_state !== undefined && out.initial_state !== data.initial_state)
+        issues.push(
+          `${label}: initial_state "${data.initial_state}" disagrees with ${from.initial_state} ("${out.initial_state}")`,
+        )
+      else {
+        out.initial_state = data.initial_state
+        from.initial_state ??= label
+      }
+    }
+  }
+  if (issues.length) throw new WorkflowError('workflow fragments do not merge', issues)
+  return { workflow: out, origin }
 }
 
 export interface AvailableTransition extends Transition {
