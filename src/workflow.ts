@@ -254,8 +254,9 @@ interface Piece<T> {
 /**
  * Merge pieces in order. States, transitions, triggers, global transitions and
  * actions accumulate; thresholds, resumption targets and initial_state must
- * agree. The first piece to define a state owns its description. Throws a
- * WorkflowError naming both files on every conflict.
+ * agree. The first piece to mention a state defines it; a later piece may add
+ * transitions and triggers to it but not a description, so two pieces never
+ * both claim a state. Throws a WorkflowError naming both files on every conflict.
  */
 export function mergeWorkflows(
   base: Piece<Workflow> | null,
@@ -285,7 +286,10 @@ export function mergeWorkflows(
         out.states[name] = copy
         origin.states[name] = label
       } else {
-        if (state.description && !existing.description) existing.description = state.description
+        if (state.description !== undefined)
+          issues.push(
+            `${label}: state "${name}" is already defined in ${origin.states[name]}; a later piece may add transitions and triggers to it, not a description`,
+          )
         if (state.transitions?.length) existing.transitions = [...(existing.transitions ?? []), ...state.transitions]
         if (state.triggers?.length) existing.triggers = [...(existing.triggers ?? []), ...state.triggers]
       }

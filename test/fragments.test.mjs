@@ -57,6 +57,11 @@ test('fragments merge in filename order and only fragments can make a whole work
     ['first', 'second'],
   )
   assert.equal(engine.graph.state('idle').description, 'Start')
+  // Order decides listing, never ownership: b.json describing idle too is a conflict, not a loser.
+  fragment(root, 'b.json', {
+    states: { idle: { description: 'Also start', transitions: [{ event: 'second', target: 'idle' }] } },
+  })
+  assert.throws(() => engineFor(root), /b\.json: state "idle" is already defined in a\.json/)
   assert.equal(flowCheck.handler(engine, {}).state, 'idle')
 })
 
@@ -84,6 +89,9 @@ test('merge conflicts name both files', () => {
   }
   assert.deepEqual(conflict({ states: { idle: { transitions: [{ event: 'task-picked', target: 'idle' }] } } }), [
     'x.json: state "idle" event "task-picked" is already defined in workflow.json',
+  ])
+  assert.deepEqual(conflict({ states: { idle: { description: 'Mine now' } } }), [
+    'x.json: state "idle" is already defined in workflow.json; a later piece may add transitions and triggers to it, not a description',
   ])
   assert.deepEqual(conflict({ states: {}, thresholds: { max_review_rounds: 5 } }), [
     'x.json: threshold "max_review_rounds" = 5 disagrees with workflow.json (3)',
