@@ -84,6 +84,22 @@ A missing or invalid workflow does not crash the server. Every tool call returns
 
 The engine validates the file on load: every target and `except` entry names a real state, every condition parses, thresholds are numbers, `initial_state` and `resumption_targets` point at states. `--validate` runs the same check from the shell. `schema/workflow.schema.json` gives editors completion.
 
+## Fragments
+
+A workflow can be composed from pieces. Beside the workflow file, every `*.json` in `workflow.d/` is a fragment, merged into it in filename order at load time:
+
+```
+.forge/
+├── workflow.json           ← the base (optional when fragments exist)
+└── workflow.d/
+    ├── build.json          ← one plugin's states
+    └── planning.json       ← another plugin's states
+```
+
+A fragment has the same shape as a workflow, minus `config`. It can add states, add transitions and triggers to states another piece defines, and contribute global transitions, global actions, thresholds and resumption targets. Pieces accumulate; they never override: two pieces defining the same event on one state, the same threshold with different values, different initial states, or the same global event is a load error that names both files. A state entry that carries a `description` is a definition; one without is an extension, adding transitions and triggers to a state some other piece defines. Two definitions of one state are a load error, in either order, so no two pieces claim a state and filename order never picks a winner. A fragment's `name` is taken as the plugin that ships it, and `flow_modify` names that plugin when it refuses an edit. The merged graph is validated like a single file, so a fragment may target a state another fragment defines; the handoff states (often just `idle`) are the contract between them.
+
+This is how several plugins share one lifecycle without any of them knowing the others' states: each ships its fragment, an installer copies it into `workflow.d/`, and removing the plugin takes its states with it. `flow_modify` edits the base file only and refuses, naming the fragment, when asked to change a state, event or threshold a fragment owns. `--validate` reports the fragment count.
+
 ## Tools
 
 | Tool | Does |

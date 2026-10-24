@@ -13,4 +13,18 @@ export * as flowHistory from './tools/history.js'
 export * as flowModify from './tools/modify.js'
 export * as flowTransition from './tools/transition.js'
 export type * from './types.js'
-export { WorkflowError, WorkflowGraph, loadWorkflow, parseWorkflow, validateWorkflow } from './workflow.js'
+export {
+  WorkflowError,
+  WorkflowGraph,
+  composeWorkflow,
+  fragmentPaths,
+  fragmentsDir,
+  loadWorkflow,
+  loadWorkflowSources,
+  mergeWorkflows,
+  parseFragment,
+  parseWorkflow,
+  validateFragment,
+  validateWorkflow,
+} from './workflow.js'
+export type { LoadedWorkflow, WorkflowFragment, WorkflowOrigin, WorkflowSources } from './workflow.js'

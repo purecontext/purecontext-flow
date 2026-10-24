@@ -4,7 +4,6 @@ import { readFileSync } from 'node:fs'
 import { parseArgs } from 'node:util'
 import { createEngine } from './engine.js'
 import { serveStdio } from './server.js'
-import { loadWorkflow } from './workflow.js'
 
 const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { version: string }
 
@@ -62,8 +61,9 @@ const options = {
 if (values.validate) {
   try {
     const engine = createEngine(options)
-    loadWorkflow(engine.config.workflowPath)
-    process.stderr.write(`${engine.config.workflowPath}: valid (${engine.graph.stateNames().length} states)\n`)
+    const { fragments } = engine.sources
+    const count = fragments.length ? `, ${fragments.length} fragment${fragments.length === 1 ? '' : 's'}` : ''
+    process.stderr.write(`${engine.config.workflowPath}: valid (${engine.graph.stateNames().length} states${count})\n`)
     process.exit(0)
   } catch (err) {
     process.stderr.write(`${(err as Error).message}\n`)
@@ -82,4 +82,4 @@ try {
   startupError = (err as Error).message
   process.stderr.write(`purecontext-flow: ${startupError}\n`)
 }
-await serveStdio(engine, { version: pkg.version, startupError })
+await serveStdio(engine, { version: pkg.version, startupError, start: () => createEngine(options) })

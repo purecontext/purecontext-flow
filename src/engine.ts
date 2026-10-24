@@ -1,8 +1,15 @@
+import { basename } from 'node:path'
 import { type ConfigInput, resolveConfig, resolveRoot, stateFilePath } from './config.js'
 import { appendLog, readLog } from './log.js'
 import { readState, writeState } from './state.js'
 import type { CheckContext, LogEntry, ResolvedConfig, StateData, Workflow } from './types.js'
-import { WorkflowGraph, loadWorkflow } from './workflow.js'
+import {
+  type LoadedWorkflow,
+  WorkflowGraph,
+  type WorkflowOrigin,
+  type WorkflowSources,
+  loadWorkflowSources,
+} from './workflow.js'
 
 export interface EngineOptions extends ConfigInput {
   /** Supply the workflow directly instead of reading `workflowPath`. Tests and embedders use this. */
@@ -24,15 +31,25 @@ export interface CurrentState {
 export class Engine {
   readonly config: ResolvedConfig
   graph: WorkflowGraph
+  /** The files the graph was composed from. */
+  sources: WorkflowSources
+  /** Which file defines each state, event and threshold; flow_modify refuses to edit what a fragment owns. */
+  origin: WorkflowOrigin
 
-  constructor(config: ResolvedConfig, workflow: Workflow) {
+  constructor(config: ResolvedConfig, workflow: Workflow | LoadedWorkflow) {
     this.config = config
-    this.graph = new WorkflowGraph(workflow)
+    const loaded = 'workflow' in workflow ? workflow : fromSingleFile(workflow, config.workflowPath)
+    this.graph = new WorkflowGraph(loaded.workflow)
+    this.sources = loaded.sources
+    this.origin = loaded.origin
   }
 
   /** Swap in a new graph, e.g. after flow_modify writes the workflow file. */
-  reload(workflow: Workflow): void {
-    this.graph = new WorkflowGraph(workflow)
+  reload(workflow: Workflow | LoadedWorkflow): void {
+    const loaded = 'workflow' in workflow ? workflow : fromSingleFile(workflow, this.config.workflowPath)
+    this.graph = new WorkflowGraph(loaded.workflow)
+    this.sources = loaded.sources
+    this.origin = loaded.origin
   }
 
   get workflow(): Workflow {
@@ -79,7 +96,21 @@ export class Engine {
 /** Resolve the root, load and validate the workflow, then resolve the rest of the config from it. */
 export function createEngine(options: EngineOptions = {}): Engine {
   const { workflowPath } = resolveRoot(options)
-  const workflow = options.workflowData ?? loadWorkflow(workflowPath)
-  const config = resolveConfig(options, workflow.config ?? {})
-  return new Engine(config, workflow)
+  const loaded = options.workflowData
+    ? fromSingleFile(options.workflowData, workflowPath)
+    : loadWorkflowSources(workflowPath)
+  const config = resolveConfig(options, loaded.workflow.config ?? {})
+  return new Engine(config, loaded)
+}
+
+/** A workflow supplied as data, or read from one file: every state, event and threshold is the base's. */
+function fromSingleFile(workflow: Workflow, workflowPath: string): LoadedWorkflow {
+  const label = basename(workflowPath)
+  const origin: WorkflowOrigin = { states: {}, events: {}, thresholds: {}, names: {} }
+  for (const [name, s] of Object.entries(workflow.states)) {
+    origin.states[name] = label
+    for (const t of s.transitions ?? []) origin.events[`${name} ${t.event}`] = label
+  }
+  for (const k of Object.keys(workflow.thresholds ?? {})) origin.thresholds[k] = label
+  return { workflow, sources: { base: workflowPath, fragments: [] }, origin }
 }
