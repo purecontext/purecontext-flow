@@ -15,8 +15,9 @@ export interface GlobalTransition extends Transition {
 
 /**
  * An automatic transition. `condition` is `always`, or `<path> <op> <path|number>`
- * where paths are dotted lookups into the check context, with `thresholds.*`
- * resolving to the workflow's thresholds.
+ * where paths are dotted lookups into the state file's fields with the check
+ * context laid over them, and `thresholds.*` resolves to the workflow's thresholds
+ * (a state file field named `thresholds` is ignored).
  */
 export interface Trigger {
   condition: string
@@ -75,6 +76,6 @@ export interface CheckContext {
 
 export interface LogEntry {
   timestamp: string
-  type: 'transition' | 'judgment' | 'trigger'
+  type: 'transition' | 'judgment' | 'trigger' | 'update'
   [key: string]: unknown
 }

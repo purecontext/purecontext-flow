@@ -76,7 +76,7 @@ A missing or invalid workflow does not crash the server. Every tool call returns
 | Key | Meaning |
 |---|---|
 | `states.<name>.transitions[]` | `event` moves to `target`; `action` is the command the agent should run next; `judgment: true` marks a choice the agent has to evaluate. |
-| `states.<name>.triggers[]` | Automatic transitions. `condition` is `always`, or `<path> <op> <path\|number>` where paths are dotted lookups into the `flow_check` context and `thresholds.*` reads the workflow's thresholds. A counter missing from an existing object (e.g. `session_counters`) reads as 0; a path whose parent is missing is unresolvable and never fires; a `thresholds.*` key the workflow does not define is a load error. |
+| `states.<name>.triggers[]` | Automatic transitions. `condition` is `always`, or `<path> <op> <path\|number>` where paths are dotted lookups into the state file's fields with the `flow_check` context laid over them (a top-level context key replaces the file's whole value), and `thresholds.*` reads the workflow's thresholds (a state file field named `thresholds` is ignored). A counter missing from an existing object (e.g. `session_counters`) reads as 0; a path whose parent is missing is unresolvable and never fires; a `thresholds.*` key the workflow does not define is a load error. |
 | `global_transitions[]` | Available from every state not in `except`. A state's own event with the same name wins. |
 | `initial_state` | What a project is in before its state file has a state. `flow_transition` creates the file on the first event. |
 | `resumption_targets` | For a transition with `"target": null`: the state to enter, looked up by the previous state. Used for "new session, pick up where we were". |
@@ -104,15 +104,16 @@ This is how several plugins share one lifecycle without any of them knowing the 
 
 | Tool | Does |
 |---|---|
-| `flow_check` | What can happen next: an `auto_action` when a trigger fires, otherwise the valid `options`. Reads the state file when `workflow_state` is omitted. |
-| `flow_transition` | Applies an event. Validates it, writes the new state and the previous state to the state file in one write along with any `state_updates`, and logs it. The only way state changes. |
+| `flow_check` | What can happen next: an `auto_action` when a trigger fires, otherwise the valid `options`. Reads the state file when `workflow_state` is omitted. Triggers read the state file's fields either way, so a counter a skill wrote fires its trigger without the caller passing it; a state file it cannot read beside an explicit `workflow_state` is reported as `state_file_error`. |
+| `flow_transition` | Applies an event. Validates it, writes the new state and the previous state to the state file in one write along with any `state_updates`, and logs it. The only way state changes. When the handler refuses an event (invalid event, unknown state, unresolvable resumption, an unreadable or unwritable state file) it writes nothing and names the fields it dropped as `dropped_state_updates`. A workflow that fails to load returns its load error before the handler runs, without that field. |
+| `flow_update` | Writes fields to the state file without changing state (a counter, a task id), merged shallowly in one write and logged as an `update` entry. Refuses the state and previous-state fields. |
 | `flow_explain` | Shortest path between two states, or everything reachable from one. |
 | `flow_history` | Query the log: recent entries, filtered entries, or a summary that flags judgments which always resolve the same way. |
 | `flow_modify` | Guided edits to the workflow file with a preview step. Refuses a change that would leave the file invalid; on confirm the server loads the new graph without a restart. Rewrites the file as 2-space JSON. |
 
 ### Many projects under one root
 
-`flow_check` and `flow_transition` take an optional `project_path`. The state file is then resolved under that directory instead of the root, with the log staying at the root. A planning workbench with `projects/<name>/state.json` sets `"config": { "state_file": "state.json" }` and passes `project_path: "projects/<name>"`.
+`flow_check`, `flow_transition` and `flow_update` take an optional `project_path`. The state file is then resolved under that directory instead of the root, with the log staying at the root. A planning workbench with `projects/<name>/state.json` sets `"config": { "state_file": "state.json" }` and passes `project_path: "projects/<name>"`.
 
 ## Develop
 

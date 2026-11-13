@@ -4,13 +4,13 @@ import type { LogEntry } from '../types.js'
 export const schema = {
   name: 'flow_history',
   description:
-    'Query the transition, judgment and trigger log. "recent" returns the last N entries, "filter" the first N matching entries, "summary" aggregate counts and judgment conditions that always resolve the same way.',
+    'Query the transition, judgment, trigger and update log. "recent" returns the last N entries, "filter" the first N matching entries, "summary" aggregate counts and judgment conditions that always resolve the same way.',
   inputSchema: {
     type: 'object',
     properties: {
       mode: { type: 'string', enum: ['recent', 'filter', 'summary'], description: 'Default: recent.' },
       limit: { type: 'number', description: 'Max entries (default 20).' },
-      type: { type: 'string', enum: ['transition', 'judgment', 'trigger'] },
+      type: { type: 'string', enum: ['transition', 'judgment', 'trigger', 'update'] },
       state: { type: 'string', description: 'Match from_state or state.' },
       since: { type: 'string', description: 'ISO timestamp; only entries at or after it.' },
     },

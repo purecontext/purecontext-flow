@@ -45,33 +45,44 @@ export interface TransitionArgs {
 
 export function handler(engine: Engine, { event, project_path, state_updates, context, judgment }: TransitionArgs) {
   const { graph, config } = engine
+  // Nothing is written on a refusal, so the caller's fields are named back: they are lost unless it re-sends them.
+  const hasUpdates = !!state_updates && Object.keys(state_updates).length > 0
+  const refuse = (body: Record<string, unknown>) =>
+    hasUpdates
+      ? {
+          ...body,
+          dropped_state_updates: state_updates,
+          dropped_note:
+            'Nothing was written. Fields still true without the state change go through flow_update; the rest go with the corrected event.',
+        }
+      : body
   let current: ReturnType<Engine['current']>
   try {
     current = engine.current(project_path)
   } catch (err) {
-    return { error: `Failed to read the state file: ${(err as Error).message}` }
+    return refuse({ error: `Failed to read the state file: ${(err as Error).message}` })
   }
   const { path, data } = current
   if (!current.state) {
-    return {
+    return refuse({
       error: current.exists
         ? `${path} has no ${config.stateField} field and the workflow has no initial_state`
         : `No state file at ${path} and the workflow has no initial_state`,
       state_path: path,
-    }
+    })
   }
   const from = current.state
   if (!graph.state(from)) {
-    return { error: `Unknown state in ${path}: "${from}"`, valid_states: graph.stateNames(), state_path: path }
+    return refuse({ error: `Unknown state in ${path}: "${from}"`, valid_states: graph.stateNames(), state_path: path })
   }
 
   const transition = graph.findTransition(from, event)
   if (!transition) {
-    return {
+    return refuse({
       error: `Invalid transition: event "${event}" is not valid from state "${from}"`,
       valid_events: graph.availableTransitions(from).map((t) => t.event),
       state_path: path,
-    }
+    })
   }
 
   let target = transition.target
@@ -80,10 +91,10 @@ export function handler(engine: Engine, { event, project_path, state_updates, co
     const previous = engine.previousState(data)
     const resumption = graph.resolveResumption(previous)
     if (!resumption) {
-      return {
+      return refuse({
         error: `Event "${event}" from "${from}" resolves its target from the previous state, but "${previous}" has no resumption target`,
         state_path: path,
-      }
+      })
     }
     target = resumption.target
     description = resumption.description
@@ -101,7 +112,7 @@ export function handler(engine: Engine, { event, project_path, state_updates, co
   try {
     engine.writeState(path, data)
   } catch (err) {
-    return { error: `Failed to write the state file: ${(err as Error).message}`, state_path: path }
+    return refuse({ error: `Failed to write the state file: ${(err as Error).message}`, state_path: path })
   }
 
   engine.log({

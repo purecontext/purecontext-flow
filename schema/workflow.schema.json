@@ -72,7 +72,7 @@
       "properties": {
         "condition": {
           "type": "string",
-          "description": "\"always\", or \"<path> <op> <path|number>\" with op in >= <= == != > <; paths are dotted lookups into the check context, and thresholds.* reads the workflow thresholds"
+          "description": "\"always\", or \"<path> <op> <path|number>\" with op in >= <= == != > <; paths are dotted lookups into the state file fields with the check context laid over them, and thresholds.* reads the workflow thresholds"
         },
         "target": { "type": ["string", "null"] },
         "action": { "type": ["string", "null"] },
