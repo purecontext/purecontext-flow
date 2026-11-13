@@ -1,0 +1,5 @@
+# pnpm 11 reads build-script approvals here, not from package.json's "pnpm"
+# field. Biome's binary arrives through optionalDependencies, so its
+# postinstall is not needed.
+allowBuilds:
+  "@biomejs/biome": false
