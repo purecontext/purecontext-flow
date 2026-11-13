@@ -75,6 +75,6 @@ export interface CheckContext {
 
 export interface LogEntry {
   timestamp: string
-  type: 'transition' | 'judgment' | 'trigger'
+  type: 'transition' | 'judgment' | 'trigger' | 'update'
   [key: string]: unknown
 }

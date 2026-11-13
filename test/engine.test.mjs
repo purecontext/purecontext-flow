@@ -10,6 +10,7 @@ import {
   flowHistory,
   flowModify,
   flowTransition,
+  flowUpdate,
   resolveConfig,
 } from '../dist/index.js'
 import { project, workflow } from './fixture.mjs'
@@ -296,6 +297,99 @@ test('flow_transition: a bad state in the file is reported, not applied', () => 
   const engine = engineFor(project({ state: { workflow_state: 'bogus' } }))
   const result = flowTransition.handler(engine, { event: 'task-picked' })
   assert.match(result.error, /Unknown state in .*: "bogus"/)
+})
+
+test('flow_transition: a refusal names the state_updates it did not write', () => {
+  const root = project({ state: { workflow_state: 'idle' } })
+  const engine = engineFor(root)
+  const refused = flowTransition.handler(engine, { event: 'approved', state_updates: { pr: 7 } })
+  assert.match(refused.error, /not valid from state "idle"/)
+  assert.deepEqual(refused.dropped_state_updates, { pr: 7 })
+  assert.match(refused.dropped_note, /flow_update/)
+  assert.equal(readJson(join(root, '.forge/dev-state.json')).pr, undefined, 'nothing was written')
+
+  const bare = flowTransition.handler(engine, { event: 'approved' })
+  assert.equal(bare.dropped_state_updates, undefined, 'no updates, no dropped field')
+  const empty = flowTransition.handler(engine, { event: 'approved', state_updates: {} })
+  assert.equal(empty.dropped_state_updates, undefined)
+
+  const badState = engineFor(project({ state: { workflow_state: 'bogus' } }))
+  assert.deepEqual(
+    flowTransition.handler(badState, { event: 'task-picked', state_updates: { a: 1 } }).dropped_state_updates,
+    { a: 1 },
+  )
+})
+
+test('flow_update: writes fields without a state change, rejects reserved keys, and logs', () => {
+  const root = project({ state: { workflow_state: 'in-review', previous_workflow_state: 'shipping', note: 'keep' } })
+  const engine = engineFor(root)
+  const result = flowUpdate.handler(engine, {
+    state_updates: { session_counters: { review_rounds: 2 }, workflow_state: 'idle' },
+    context: { why: 'round pushed' },
+  })
+  assert.equal(result.success, true)
+  assert.equal(result.state, 'in-review')
+  assert.deepEqual(result.updated_fields, ['session_counters'])
+  assert.deepEqual(result.ignored_state_updates, ['workflow_state'])
+  const file = readJson(join(root, '.forge/dev-state.json'))
+  assert.deepEqual(file, {
+    workflow_state: 'in-review',
+    previous_workflow_state: 'shipping',
+    note: 'keep',
+    session_counters: { review_rounds: 2 },
+  })
+  assert.deepEqual(result.updated_state, file)
+  const [entry] = engine.history()
+  assert.equal(entry.type, 'update')
+  assert.equal(entry.state, 'in-review')
+  assert.deepEqual(entry.fields, ['session_counters'])
+  assert.deepEqual(entry.context, { why: 'round pushed' })
+  assert.equal(entry.state_path, join(root, '.forge/dev-state.json'))
+})
+
+test('flow_update: refuses an empty or reserved-only update, and creates a missing file without a state', () => {
+  const root = project()
+  const engine = engineFor(root)
+  assert.match(flowUpdate.handler(engine, { state_updates: {} }).error, /empty/)
+  assert.match(flowUpdate.handler(engine, {}).error, /must be an object/)
+  assert.match(flowUpdate.handler(engine, { state_updates: [1] }).error, /must be an object/)
+  assert.match(
+    flowUpdate.handler(engine, { state_updates: { previous_workflow_state: 'x' } }).error,
+    /Only reserved fields.*flow_transition/,
+  )
+  assert.equal(existsSync(join(root, '.forge/dev-state.json')), false, 'a refusal writes nothing')
+
+  const created = flowUpdate.handler(engine, { state_updates: { task: 'T-2' } })
+  assert.equal(created.state, null, 'initial_state is not written by an update')
+  assert.deepEqual(readJson(join(root, '.forge/dev-state.json')), { task: 'T-2' })
+  assert.equal(flowCheck.handler(engine, {}).state, 'idle', 'the state still falls back to initial_state')
+})
+
+test('flow_check: triggers read the state file, with context laid over it', () => {
+  const root = project({ state: { workflow_state: 'in-review', session_counters: { review_rounds: 3 } } })
+  const engine = engineFor(root)
+  const statePath = join(root, '.forge/dev-state.json')
+
+  const fromFile = flowCheck.handler(engine, {})
+  assert.equal(fromFile.auto_action.target, 'escalated', 'the counter in the file fires the trigger')
+  const explicit = flowCheck.handler(engine, { workflow_state: 'in-review' })
+  assert.equal(explicit.auto_action.target, 'escalated', 'an explicit state still reads the file for triggers')
+  assert.equal(explicit.state_path, undefined, 'the state did not come from the file')
+  assert.equal(engine.history().at(-1).state_path, statePath, 'the trigger log names the file it read')
+
+  const overridden = flowCheck.handler(engine, { context: { session_counters: { review_rounds: 1 } } })
+  assert.equal(overridden.auto_action, null, 'context replaces the file value')
+  assert.ok(overridden.options.length > 0)
+
+  writeFileSync(statePath, JSON.stringify({ workflow_state: 'in-review', session_counters: { review_rounds: 2 } }))
+  assert.equal(flowCheck.handler(engine, {}).auto_action, null, 'below the threshold nothing fires')
+
+  writeFileSync(statePath, '{ not json')
+  const broken = flowCheck.handler(engine, { workflow_state: 'in-review' })
+  assert.equal(broken.state, 'in-review')
+  assert.match(broken.state_file_error, /without the state file/)
+  assert.equal(broken.auto_action, null)
+  assert.match(flowCheck.handler(engine, {}).error, /Failed to read the state file/)
 })
 
 test('flow_history: recent, filter, since and summary', () => {

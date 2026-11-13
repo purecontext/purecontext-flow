@@ -4,7 +4,7 @@ import type { CheckContext } from '../types.js'
 export const schema = {
   name: 'flow_check',
   description:
-    'What can happen next. Given the current state (or reading it from the state file when omitted), returns an auto_action if a trigger fires, otherwise the valid transitions. Call it before acting, and after every flow_transition.',
+    "What can happen next. Given the current state (or reading it from the state file when omitted), returns an auto_action if a trigger fires, otherwise the valid transitions. Triggers read the state file's fields, with context overriding them. Call it before acting, and after every flow_transition.",
   inputSchema: {
     type: 'object',
     properties: {
@@ -24,7 +24,7 @@ export const schema = {
       context: {
         type: 'object',
         description:
-          'Values trigger conditions read, by dotted path (e.g. session_counters.review_rounds). Include the previous state under previous_workflow_state to resolve a resumption.',
+          "Values trigger conditions read, by dotted path (e.g. session_counters.review_rounds), laid over the state file's fields: a top-level key here replaces the file's whole value. Include the previous state under previous_workflow_state to resolve a resumption.",
         additionalProperties: true,
       },
     },
@@ -43,6 +43,10 @@ export function handler(engine: Engine, { workflow_state, project_path, context 
   let stateName = workflow_state
   let previous: string | undefined
   let fromFile: string | undefined
+  // The state file's fields are what triggers read, so a counter a skill wrote is seen without the caller passing it.
+  let fileData: Record<string, unknown> = {}
+  let scopePath: string | undefined
+  let stateFileError: string | undefined
   if (!stateName) {
     let current: ReturnType<Engine['current']>
     try {
@@ -59,8 +63,21 @@ export function handler(engine: Engine, { workflow_state, project_path, context 
     stateName = current.state
     fromFile = current.path
     previous = engine.previousState(current.data, context)
+    if (current.exists) {
+      fileData = current.data
+      scopePath = current.path
+    }
   } else {
     previous = engine.previousState({}, context)
+    try {
+      const current = engine.current(project_path)
+      if (current.exists) {
+        fileData = current.data
+        scopePath = current.path
+      }
+    } catch (err) {
+      stateFileError = (err as Error).message
+    }
   }
 
   const state = graph.state(stateName)
@@ -73,6 +90,9 @@ export function handler(engine: Engine, { workflow_state, project_path, context 
     description: state.description ?? null,
     ...(fromFile ? { state_path: fromFile } : {}),
     global_actions: graph.globalActions(),
+    ...(stateFileError
+      ? { state_file_error: `Triggers were evaluated without the state file: ${stateFileError}` }
+      : {}),
   }
 
   if (graph.hasResumption(stateName)) {
@@ -96,7 +116,7 @@ export function handler(engine: Engine, { workflow_state, project_path, context 
     }
   }
 
-  const trigger = graph.evaluateTriggers(stateName, context ?? {})
+  const trigger = graph.evaluateTriggers(stateName, { ...fileData, ...(context ?? {}) })
   if (trigger) {
     engine.log({
       type: 'trigger',
@@ -104,7 +124,7 @@ export function handler(engine: Engine, { workflow_state, project_path, context 
       trigger: trigger.condition,
       context: context ?? null,
       target: trigger.target,
-      state_path: fromFile ?? null,
+      state_path: scopePath ?? fromFile ?? null,
     })
     return {
       ...base,

@@ -22,14 +22,14 @@ async function connect(args, env = {}) {
 }
 const text = (r) => JSON.parse(r.content[0].text)
 
-test('the CLI serves the five tools over stdio and transitions a real project', async () => {
+test('the CLI serves the six tools over stdio and transitions a real project', async () => {
   const root = project({ state: { workflow_state: 'idle' } })
   const client = await connect(['--root', root])
   try {
     const { tools } = await client.listTools()
     assert.deepEqual(
       tools.map((t) => t.name),
-      ['flow_check', 'flow_transition', 'flow_explain', 'flow_history', 'flow_modify'],
+      ['flow_check', 'flow_transition', 'flow_update', 'flow_explain', 'flow_history', 'flow_modify'],
     )
     const check = text(await client.callTool({ name: 'flow_check', arguments: {} }))
     assert.equal(check.state, 'idle')
@@ -64,7 +64,7 @@ test('a missing workflow keeps the server up and every call returns the same err
   const client = await connect(['--root', root, '--workflow', 'missing.json'])
   try {
     const { tools } = await client.listTools()
-    assert.equal(tools.length, 5)
+    assert.equal(tools.length, 6)
     const r = await client.callTool({ name: 'flow_check', arguments: { workflow_state: 'idle' } })
     assert.equal(r.isError, true)
     assert.match(text(r).error, /No workflow at .*missing\.json/)

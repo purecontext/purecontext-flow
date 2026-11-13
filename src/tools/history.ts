@@ -10,7 +10,7 @@ export const schema = {
     properties: {
       mode: { type: 'string', enum: ['recent', 'filter', 'summary'], description: 'Default: recent.' },
       limit: { type: 'number', description: 'Max entries (default 20).' },
-      type: { type: 'string', enum: ['transition', 'judgment', 'trigger'] },
+      type: { type: 'string', enum: ['transition', 'judgment', 'trigger', 'update'] },
       state: { type: 'string', description: 'Match from_state or state.' },
       since: { type: 'string', description: 'ISO timestamp; only entries at or after it.' },
     },

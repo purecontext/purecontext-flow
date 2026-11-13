@@ -7,6 +7,7 @@ import * as explain from './tools/explain.js'
 import * as history from './tools/history.js'
 import * as modify from './tools/modify.js'
 import * as transition from './tools/transition.js'
+import * as update from './tools/update.js'
 
 export const SERVER_NAME = 'purecontext-flow'
 
@@ -16,6 +17,7 @@ type Handler = (engine: Engine, args: any) => unknown
 export const tools: { schema: { name: string; description: string; inputSchema: object }; handler: Handler }[] = [
   check,
   transition,
+  update,
   explain,
   history,
   modify,

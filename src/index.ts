@@ -12,6 +12,7 @@ export * as flowExplain from './tools/explain.js'
 export * as flowHistory from './tools/history.js'
 export * as flowModify from './tools/modify.js'
 export * as flowTransition from './tools/transition.js'
+export * as flowUpdate from './tools/update.js'
 export type * from './types.js'
 export {
   WorkflowError,
