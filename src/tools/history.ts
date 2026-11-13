@@ -4,7 +4,7 @@ import type { LogEntry } from '../types.js'
 export const schema = {
   name: 'flow_history',
   description:
-    'Query the transition, judgment and trigger log. "recent" returns the last N entries, "filter" the first N matching entries, "summary" aggregate counts and judgment conditions that always resolve the same way.',
+    'Query the transition, judgment, trigger and update log. "recent" returns the last N entries, "filter" the first N matching entries, "summary" aggregate counts and judgment conditions that always resolve the same way.',
   inputSchema: {
     type: 'object',
     properties: {

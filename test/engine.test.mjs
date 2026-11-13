@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { test } from 'node:test'
 import {
@@ -390,6 +390,74 @@ test('flow_check: triggers read the state file, with context laid over it', () =
   assert.match(broken.state_file_error, /without the state file/)
   assert.equal(broken.auto_action, null)
   assert.match(flowCheck.handler(engine, {}).error, /Failed to read the state file/)
+})
+
+test('flow_check: an explicit state reads the project_path file for triggers, never the root file', () => {
+  const root = project({ state: { workflow_state: 'in-review', session_counters: { review_rounds: 9 } } })
+  mkdirSync(join(root, 'projects/x/.forge'), { recursive: true })
+  const projectFile = join(root, 'projects/x/.forge/dev-state.json')
+  writeFileSync(projectFile, JSON.stringify({ workflow_state: 'in-review', session_counters: { review_rounds: 0 } }))
+  const engine = engineFor(root)
+  const scoped = flowCheck.handler(engine, { workflow_state: 'in-review', project_path: 'projects/x' })
+  assert.equal(scoped.auto_action, null, "the project's counter, not the root's")
+  const rootCheck = flowCheck.handler(engine, { workflow_state: 'in-review' })
+  assert.equal(rootCheck.auto_action.target, 'escalated', 'without project_path the root file is the scope')
+  assert.equal(engine.history().at(-1).state_path, join(root, '.forge/dev-state.json'))
+})
+
+test('flow_check: a thresholds field in the state file is ignored, and a fired trigger logs the values it read', () => {
+  const root = project({
+    state: {
+      workflow_state: 'in-review',
+      session_counters: { review_rounds: 5 },
+      thresholds: { max_review_rounds: 99 },
+    },
+  })
+  const engine = engineFor(root)
+  assert.equal(flowUpdate.handler(engine, { state_updates: { note: 'x' } }).success, true)
+  const fired = flowCheck.handler(engine, {})
+  assert.equal(fired.auto_action.target, 'escalated', "the workflow's threshold holds")
+  const entry = engine.history().at(-1)
+  assert.equal(entry.type, 'trigger')
+  assert.deepEqual(entry.values, { 'session_counters.review_rounds': 5, 'thresholds.max_review_rounds': 3 })
+  assert.equal(entry.context, null)
+})
+
+test('flow_history filters update entries', () => {
+  const engine = engineFor(project({ state: { workflow_state: 'idle' } }))
+  flowUpdate.handler(engine, { state_updates: { task: 'T-3' } })
+  flowTransition.handler(engine, { event: 'task-picked' })
+  const updates = flowHistory.handler(engine, { mode: 'filter', type: 'update' })
+  assert.equal(updates.returned, 1)
+  assert.deepEqual(updates.entries[0].fields, ['task'])
+})
+
+test('flow_transition: unresolvable resumption and a failed write also name the dropped fields', () => {
+  const resumeless = engineFor(project({ state: { workflow_state: 'cleared' } }))
+  const r = flowTransition.handler(resumeless, { event: 'resume', state_updates: { a: 1 } })
+  assert.match(r.error, /no resumption target/)
+  assert.deepEqual(r.dropped_state_updates, { a: 1 })
+
+  const root = project({ state: { workflow_state: 'idle' } })
+  const dir = join(root, '.forge')
+  chmodSync(dir, 0o555)
+  try {
+    const w = flowTransition.handler(engineFor(root), { event: 'task-picked', state_updates: { b: 2 } })
+    assert.match(w.error, /Failed to write the state file/)
+    assert.deepEqual(w.dropped_state_updates, { b: 2 })
+  } finally {
+    chmodSync(dir, 0o755)
+  }
+  assert.equal(readJson(join(dir, 'dev-state.json')).workflow_state, 'idle')
+})
+
+test('flow_update: an unreadable state file is an error and stays as it was', () => {
+  const root = project()
+  const file = join(root, '.forge/dev-state.json')
+  writeFileSync(file, '{ torn')
+  const result = flowUpdate.handler(engineFor(root), { state_updates: { a: 1 } })
+  assert.match(result.error, /Failed to read the state file/)
+  assert.equal(readFileSync(file, 'utf8'), '{ torn')
 })
 
 test('flow_history: recent, filter, since and summary', () => {

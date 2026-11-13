@@ -1,3 +1,4 @@
+import { lookup, parseCondition } from '../conditions.js'
 import type { Engine } from '../engine.js'
 import type { CheckContext } from '../types.js'
 
@@ -15,7 +16,7 @@ export const schema = {
       project_path: {
         type: 'string',
         description:
-          'Project directory whose state file to read when workflow_state is omitted: relative to the root, or absolute.',
+          "Project directory whose state file to read: for the state when workflow_state is omitted, and for trigger fields either way. Relative to the root, or absolute; omit for the root's own state file.",
       },
       event: {
         type: 'string',
@@ -116,12 +117,16 @@ export function handler(engine: Engine, { workflow_state, project_path, context 
     }
   }
 
-  const trigger = graph.evaluateTriggers(stateName, { ...fileData, ...(context ?? {}) })
+  // thresholds.* is the workflow's; a state file field of that name never reaches the scope, so no write can lift a cap.
+  const { thresholds: _ignored, ...fileFields } = fileData
+  const scope: CheckContext = { ...fileFields, ...(context ?? {}) }
+  const trigger = graph.evaluateTriggers(stateName, scope)
   if (trigger) {
     engine.log({
       type: 'trigger',
       state: stateName,
       trigger: trigger.condition,
+      values: conditionValues(trigger.condition, scope, graph.thresholds()),
       context: context ?? null,
       target: trigger.target,
       state_path: scopePath ?? fromFile ?? null,
@@ -150,4 +155,18 @@ export function handler(engine: Engine, { workflow_state, project_path, context 
       description: t.description ?? null,
     })),
   }
+}
+
+/** The values a fired condition's paths resolved to, so the log says why without the state file as it was. */
+function conditionValues(
+  condition: string,
+  scope: CheckContext,
+  workflowThresholds: Record<string, number>,
+): Record<string, unknown> | null {
+  const parsed = parseCondition(condition)
+  if (!parsed || parsed.kind !== 'compare') return null
+  const full = { ...scope, thresholds: { ...workflowThresholds, ...(scope.thresholds as object | undefined) } }
+  const values: Record<string, unknown> = { [parsed.left]: lookup(full, parsed.left) ?? null }
+  if ('path' in parsed.right) values[parsed.right.path] = lookup(full, parsed.right.path) ?? null
+  return values
 }
