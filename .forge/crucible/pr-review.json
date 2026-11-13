@@ -1,0 +1,16 @@
+{
+  "gh_repo": "purecontext/purecontext-flow",
+  "target_repo_path": "/Users/jeffreese/Code/purecontext-flow",
+  "test_command": "pnpm run check",
+  "capabilities": {
+    "mobile": false,
+    "offline_first": false,
+    "web_ui": false
+  },
+  "smoke_testing": {
+    "enabled": false,
+    "dev_command": null,
+    "dev_server_url": null
+  },
+  "domain_concerns": []
+}
