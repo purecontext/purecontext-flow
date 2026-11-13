@@ -17,7 +17,7 @@ export interface GlobalTransition extends Transition {
  * An automatic transition. `condition` is `always`, or `<path> <op> <path|number>`
  * where paths are dotted lookups into the state file's fields with the check
  * context laid over them, and `thresholds.*` resolves to the workflow's thresholds
- * (a state file field named `thresholds` is ignored).
+ * (a `thresholds` key in the state file or the context is ignored).
  */
 export interface Trigger {
   condition: string

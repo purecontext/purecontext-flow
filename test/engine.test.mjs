@@ -97,7 +97,12 @@ test('flow_check: options, a firing trigger, and an unknown state', () => {
   })
   assert.equal(review.auto_action.target, 'escalated')
   assert.equal(review.auto_action.trigger_condition, 'session_counters.review_rounds >= thresholds.max_review_rounds')
-  assert.deepEqual(review.options, [])
+  assert.deepEqual(
+    review.options.map((o) => o.event),
+    ['approved', 'changes-requested', 'stop'],
+    'every valid transition stays listed beside a fired trigger',
+  )
+  assert.deepEqual(review.auto_action.via, [], 'no edge reaches escalated from in-review in this graph')
   assert.equal(engine.history().filter((e) => e.type === 'trigger').length, 1, 'a fired trigger is logged')
 
   const judged = flowCheck.handler(engine, {
@@ -468,6 +473,41 @@ test('flow_update: an unreadable state file is an error and stays as it was', ()
   const result = flowUpdate.handler(engineFor(root), { state_updates: { a: 1 } })
   assert.match(result.error, /Failed to read the state file/)
   assert.equal(readFileSync(file, 'utf8'), '{ torn')
+})
+
+test('flow_check: auto_action.via names the events that reach the trigger target, beside the other options', () => {
+  const w = workflow()
+  w.states['in-review'].transitions.push({ event: 'escalate', target: 'escalated', action: null })
+  const engine = engineFor(
+    project({ workflow: w, state: { workflow_state: 'in-review', session_counters: { review_rounds: 3 } } }),
+  )
+  const fired = flowCheck.handler(engine, {})
+  assert.deepEqual(fired.auto_action.via, ['escalate'])
+  assert.ok(
+    fired.options.some((o) => o.event === 'approved'),
+    'an event the trigger did not anticipate is still offered',
+  )
+})
+
+test('flow_check: auto_action.via includes a global transition that reaches the trigger target', () => {
+  const w = workflow()
+  w.global_transitions.push({ event: 'give-up', target: 'escalated', action: null, except: ['escalated'] })
+  const engine = engineFor(
+    project({ workflow: w, state: { workflow_state: 'in-review', session_counters: { review_rounds: 3 } } }),
+  )
+  const fired = flowCheck.handler(engine, {})
+  assert.deepEqual(fired.auto_action.via, ['give-up'])
+  assert.equal(fired.options.find((o) => o.event === 'give-up').global, true)
+})
+
+test('flow_check: a thresholds key in context cannot lift a cap', () => {
+  const engine = engineFor(project({ state: { workflow_state: 'in-review', session_counters: { review_rounds: 3 } } }))
+  const lifted = flowCheck.handler(engine, { context: { thresholds: { max_review_rounds: 99 } } })
+  assert.equal(lifted.auto_action.target, 'escalated', "the workflow's threshold holds")
+  assert.deepEqual(engine.history().at(-1).values, {
+    'session_counters.review_rounds': 3,
+    'thresholds.max_review_rounds': 3,
+  })
 })
 
 test('flow_history: recent, filter, since and summary', () => {

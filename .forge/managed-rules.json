@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "plugin_versions": {},
+  "rules": {
+    ".claude/rules/convention-tool-schema-follows-handler.md": {
+      "source": "project",
+      "local_hash": "4a58257f9c3e9e20",
+      "promoted_from": "convention-tool-schema-follows-handler"
+    }
+  },
+  "opted_out": []
+}

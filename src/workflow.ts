@@ -438,9 +438,13 @@ export class WorkflowGraph {
     return { event: 'resume', target, action: null, description: `Resume from ${previous}, entering ${target}` }
   }
 
-  /** The first trigger whose condition holds, or null. */
+  /**
+   * The first trigger whose condition holds, or null. `thresholds.*` is always the
+   * workflow's: a `thresholds` key in the context is replaced, so no caller can lift
+   * a cap for one check. Changing a threshold is flow_modify's job.
+   */
   evaluateTriggers(name: string, context: CheckContext = {}): Trigger | null {
-    const scope = { ...context, thresholds: { ...this.thresholds(), ...(context.thresholds as object | undefined) } }
+    const scope = { ...context, thresholds: this.thresholds() }
     for (const trigger of this.triggers(name)) {
       if (evaluateCondition(trigger.condition, scope) === true) return trigger
     }

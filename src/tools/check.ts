@@ -5,7 +5,7 @@ import type { CheckContext } from '../types.js'
 export const schema = {
   name: 'flow_check',
   description:
-    "What can happen next. Given the current state (or reading it from the state file when omitted), returns an auto_action if a trigger fires, otherwise the valid transitions. Triggers read the state file's fields, with context overriding them. Call it before acting, and after every flow_transition.",
+    "What can happen next. Given the current state (or reading it from the state file when omitted), returns the valid transitions as options, and an auto_action when a trigger fires (its via lists the events that reach the trigger's target). Triggers read the state file's fields, with context overriding them. Call it before acting, and after every flow_transition.",
   inputSchema: {
     type: 'object',
     properties: {
@@ -25,7 +25,7 @@ export const schema = {
       context: {
         type: 'object',
         description:
-          "Values trigger conditions read, by dotted path (e.g. session_counters.review_rounds), laid over the state file's fields: a top-level key here replaces the file's whole value. Include the previous state under previous_workflow_state to resolve a resumption.",
+          "Values trigger conditions read, by dotted path (e.g. session_counters.review_rounds), laid over the state file's fields: a top-level key here replaces the file's whole value. A thresholds key is ignored: thresholds.* is always the workflow's (change one with flow_modify). Include the previous state under previous_workflow_state to resolve a resumption.",
         additionalProperties: true,
       },
     },
@@ -117,10 +117,17 @@ export function handler(engine: Engine, { workflow_state, project_path, context 
     }
   }
 
-  // thresholds.* is the workflow's; a state file field of that name never reaches the scope, so no write can lift a cap.
-  const { thresholds: _ignored, ...fileFields } = fileData
-  const scope: CheckContext = { ...fileFields, ...(context ?? {}) }
+  // thresholds.* is the workflow's: evaluateTriggers replaces a thresholds key from the file or the context.
+  const scope: CheckContext = { ...fileData, ...(context ?? {}) }
   const trigger = graph.evaluateTriggers(stateName, scope)
+  const options = graph.availableTransitions(stateName).map((t) => ({
+    event: t.event,
+    target: t.target,
+    action: t.action ?? null,
+    judgment: t.judgment ?? false,
+    global: t.global ?? false,
+    description: t.description ?? null,
+  }))
   if (trigger) {
     engine.log({
       type: 'trigger',
@@ -138,23 +145,15 @@ export function handler(engine: Engine, { workflow_state, project_path, context 
         target: trigger.target,
         reason: trigger.description ?? null,
         trigger_condition: trigger.condition,
+        // The events that reach the trigger's target: a trigger names a state, flow_transition takes an event.
+        via: options.filter((o) => o.target === trigger.target).map((o) => o.event),
       },
-      options: [],
+      // Every valid transition stays listed, so an event the trigger did not anticipate (a merge) is still visible.
+      options,
     }
   }
 
-  return {
-    ...base,
-    auto_action: null,
-    options: graph.availableTransitions(stateName).map((t) => ({
-      event: t.event,
-      target: t.target,
-      action: t.action ?? null,
-      judgment: t.judgment ?? false,
-      global: t.global ?? false,
-      description: t.description ?? null,
-    })),
-  }
+  return { ...base, auto_action: null, options }
 }
 
 /** The values a fired condition's paths resolved to, so the log says why without the state file as it was. */
@@ -165,7 +164,7 @@ function conditionValues(
 ): Record<string, unknown> | null {
   const parsed = parseCondition(condition)
   if (!parsed || parsed.kind !== 'compare') return null
-  const full = { ...scope, thresholds: { ...workflowThresholds, ...(scope.thresholds as object | undefined) } }
+  const full = { ...scope, thresholds: workflowThresholds }
   // The condition fired, so a missing left leaf had an existing parent: the evaluator read it as 0.
   const values: Record<string, unknown> = { [parsed.left]: lookup(full, parsed.left) ?? 0 }
   if ('path' in parsed.right) values[parsed.right.path] = lookup(full, parsed.right.path) ?? null

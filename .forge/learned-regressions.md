@@ -4,5 +4,5 @@ Classes of finding from Crucible reviews and build-side wraps. A pattern recurri
 
 ### convention-tool-schema-follows-handler
 - **Pattern:** A handler's behavior widened (a file now read in more cases, a field now honored) while the tool schema's parameter description still states the narrower behavior, so a caller following the schema gets a result it was told it would not.
-- **Occurrences:** 1 (PR #2: flow_check's project_path said the file is read only when workflow_state is omitted; triggers now read it always)
-- **Status:** watching
+- **Occurrences:** 2 (PR #2: flow_check's project_path said the file is read only when workflow_state is omitted; triggers now read it always. PR #5: flow_check's context said conditions read its values by dotted path after thresholds became ignored)
+- **Status:** promoted to rule (convention-tool-schema-follows-handler.md)
