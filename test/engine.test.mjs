@@ -489,6 +489,17 @@ test('flow_check: auto_action.via names the events that reach the trigger target
   )
 })
 
+test('flow_check: auto_action.via includes a global transition that reaches the trigger target', () => {
+  const w = workflow()
+  w.global_transitions.push({ event: 'give-up', target: 'escalated', action: null, except: ['escalated'] })
+  const engine = engineFor(
+    project({ workflow: w, state: { workflow_state: 'in-review', session_counters: { review_rounds: 3 } } }),
+  )
+  const fired = flowCheck.handler(engine, {})
+  assert.deepEqual(fired.auto_action.via, ['give-up'])
+  assert.equal(fired.options.find((o) => o.event === 'give-up').global, true)
+})
+
 test('flow_check: a thresholds key in context cannot lift a cap', () => {
   const engine = engineFor(project({ state: { workflow_state: 'in-review', session_counters: { review_rounds: 3 } } }))
   const lifted = flowCheck.handler(engine, { context: { thresholds: { max_review_rounds: 99 } } })

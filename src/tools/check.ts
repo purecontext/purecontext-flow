@@ -25,7 +25,7 @@ export const schema = {
       context: {
         type: 'object',
         description:
-          "Values trigger conditions read, by dotted path (e.g. session_counters.review_rounds), laid over the state file's fields: a top-level key here replaces the file's whole value. Include the previous state under previous_workflow_state to resolve a resumption.",
+          "Values trigger conditions read, by dotted path (e.g. session_counters.review_rounds), laid over the state file's fields: a top-level key here replaces the file's whole value. A thresholds key is ignored: thresholds.* is always the workflow's (change one with flow_modify). Include the previous state under previous_workflow_state to resolve a resumption.",
         additionalProperties: true,
       },
     },
