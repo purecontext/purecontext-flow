@@ -166,7 +166,8 @@ function conditionValues(
   const parsed = parseCondition(condition)
   if (!parsed || parsed.kind !== 'compare') return null
   const full = { ...scope, thresholds: { ...workflowThresholds, ...(scope.thresholds as object | undefined) } }
-  const values: Record<string, unknown> = { [parsed.left]: lookup(full, parsed.left) ?? null }
+  // The condition fired, so a missing left leaf had an existing parent: the evaluator read it as 0.
+  const values: Record<string, unknown> = { [parsed.left]: lookup(full, parsed.left) ?? 0 }
   if ('path' in parsed.right) values[parsed.right.path] = lookup(full, parsed.right.path) ?? null
   return values
 }
